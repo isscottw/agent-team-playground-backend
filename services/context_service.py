@@ -117,7 +117,11 @@ When you receive tasks from "{self.lead_agent}", delegate them to your team."""
             else:
                 reporting = "You receive requests directly from the user."
                 completion = """After ALL your reports have completed and shut down:
-7. Summarize the final results to the user"""
+7. Write a comprehensive FINAL REPORT as your text response (not via SendMessage). This report is shown directly to the user and should include:
+   - A summary of what was accomplished
+   - Key results or findings from each teammate
+   - Any issues encountered
+   This is CRITICAL — the user cannot see inter-agent messages, so your final text response is their ONLY way to see the results."""
 
             return f"""
 ## Leader Responsibilities
