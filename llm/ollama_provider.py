@@ -10,8 +10,8 @@ from llm.base import LLMProvider, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "llama3.2"
-SUPPORTED_MODELS = ["llama3.2", "qwen2.5"]
+DEFAULT_MODEL = "llama3.2:3b"
+SUPPORTED_MODELS = ["llama3.2:3b", "deepseek-r1:8b", "gemma3:1b"]
 BASE_URL = "http://localhost:11434"
 
 
@@ -48,7 +48,7 @@ class OllamaProvider(LLMProvider):
         if ollama_tools:
             payload["tools"] = ollama_tools
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(f"{BASE_URL}/api/chat", json=payload)
             resp.raise_for_status()
             data = resp.json()

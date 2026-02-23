@@ -6,15 +6,15 @@ from typing import Any, Dict, List, Optional
 MODELS: Dict[str, List[Dict[str, Any]]] = {
     "anthropic": [
         {
-            "id": "claude-sonnet-4-6",
-            "name": "Claude Sonnet 4.6",
+            "id": "claude-sonnet-4-20250514",
+            "name": "Claude Sonnet 4",
             "provider": "anthropic",
             "description": "Fast, intelligent model for everyday tasks",
             "context_window": 200000,
             "supports_tools": True,
         },
         {
-            "id": "claude-haiku-4-5",
+            "id": "claude-haiku-4-5-20251001",
             "name": "Claude Haiku 4.5",
             "provider": "anthropic",
             "description": "Fastest, most compact model for quick responses",
@@ -52,19 +52,27 @@ MODELS: Dict[str, List[Dict[str, Any]]] = {
     ],
     "ollama": [
         {
-            "id": "llama3.2",
-            "name": "Llama 3.2",
+            "id": "llama3.2:3b",
+            "name": "Llama 3.2 3B",
             "provider": "ollama",
-            "description": "Meta's Llama 3.2 running locally via Ollama",
+            "description": "Meta's Llama 3.2 3B running locally via Ollama",
             "context_window": 128000,
             "supports_tools": True,
         },
         {
-            "id": "qwen2.5",
-            "name": "Qwen 2.5",
+            "id": "deepseek-r1:8b",
+            "name": "DeepSeek R1 8B",
             "provider": "ollama",
-            "description": "Alibaba's Qwen 2.5 running locally via Ollama",
+            "description": "DeepSeek R1 8B running locally via Ollama",
             "context_window": 128000,
+            "supports_tools": True,
+        },
+        {
+            "id": "gemma3:1b",
+            "name": "Gemma 3 1B",
+            "provider": "ollama",
+            "description": "Google's Gemma 3 1B running locally via Ollama",
+            "context_window": 32000,
             "supports_tools": True,
         },
     ],

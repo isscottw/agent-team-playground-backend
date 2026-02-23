@@ -3,6 +3,7 @@ __pycache__/
 *$py.class
 *.so
 .env
+.env.*
 .venv/
 venv/
 env/
@@ -13,3 +14,4 @@ data/
 dist/
 build/
 .pytest_cache/
+.DS_Store

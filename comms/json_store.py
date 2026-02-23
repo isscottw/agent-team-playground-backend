@@ -21,7 +21,6 @@ class InboxStore:
     def __init__(self, session_id: str, base_dir: str = "data"):
         self.session_id = session_id
         self.inbox_dir = Path(base_dir) / "sessions" / session_id / "inboxes"
-        self.inbox_dir.mkdir(parents=True, exist_ok=True)
         self._locks: Dict[str, asyncio.Lock] = {}
 
     def _get_lock(self, agent: str) -> asyncio.Lock:
@@ -33,6 +32,8 @@ class InboxStore:
         return self.inbox_dir / f"{agent}.json"
 
     def _read_raw(self, agent: str) -> List[Dict[str, Any]]:
+        if not self.inbox_dir.exists():
+            return []
         path = self._inbox_path(agent)
         if not path.exists():
             return []
@@ -40,6 +41,7 @@ class InboxStore:
             return json.load(f)
 
     def _write_raw(self, agent: str, messages: List[Dict[str, Any]]) -> None:
+        self.inbox_dir.mkdir(parents=True, exist_ok=True)
         path = self._inbox_path(agent)
         with open(path, "w") as f:
             json.dump(messages, f, indent=2)

@@ -24,6 +24,9 @@ class TaskStore:
         self._hwm_path = self.task_dir / ".highwatermark"
         if not self._hwm_path.exists():
             self._hwm_path.write_text("0")
+        self._lock_path = self.task_dir / ".lock"
+        if not self._lock_path.exists():
+            self._lock_path.write_text("")
 
     def _next_id(self) -> str:
         current = int(self._hwm_path.read_text().strip())
@@ -51,6 +54,7 @@ class TaskStore:
         description: str = "",
         owner: Optional[str] = None,
         active_form: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a new task and return it."""
         async with self._lock:
@@ -64,16 +68,29 @@ class TaskStore:
                 "blockedBy": [],
                 "blocks": [],
                 "activeForm": active_form,
+                "metadata": metadata or {},
             }
             self._write_task(task_id, task)
             return task
 
     async def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Update a task by ID. Returns the updated task or None if not found."""
+        """Update a task by ID. Returns the updated task or None if not found.
+
+        Special handling:
+        - metadata: merged dict; keys set to None are deleted
+        - status="deleted": removes the task file and returns {"deleted": True}
+        """
         async with self._lock:
             task = self._read_task(task_id)
             if task is None:
                 return None
+
+            # Handle deleted status — unlink file
+            if updates.get("status") == "deleted":
+                path = self._task_path(task_id)
+                if path.exists():
+                    path.unlink()
+                return {"id": task_id, "deleted": True}
 
             allowed_fields = {"subject", "description", "status", "owner", "blockedBy", "blocks", "activeForm"}
             for key, value in updates.items():
@@ -83,6 +100,14 @@ class TaskStore:
                 elif key == "addBlocks" and isinstance(value, list):
                     existing = task.get("blocks", [])
                     task["blocks"] = list(set(existing + value))
+                elif key == "metadata" and isinstance(value, dict):
+                    existing_meta = task.get("metadata", {})
+                    for mk, mv in value.items():
+                        if mv is None:
+                            existing_meta.pop(mk, None)
+                        else:
+                            existing_meta[mk] = mv
+                    task["metadata"] = existing_meta
                 elif key in allowed_fields:
                     task[key] = value
 

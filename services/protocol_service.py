@@ -4,6 +4,7 @@ used by Claude Code agent teams.
 """
 
 import json
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -78,11 +79,16 @@ class ProtocolService:
         )
 
     @staticmethod
-    def create_shutdown_request(from_agent: str, reason: str = "") -> Dict[str, Any]:
+    def _make_request_id(prefix: str, target: str) -> str:
+        return f"{prefix}-{int(time.time() * 1000)}@{target}"
+
+    @staticmethod
+    def create_shutdown_request(from_agent: str, reason: str = "", target: str = "") -> Dict[str, Any]:
+        request_id = ProtocolService._make_request_id("shutdown", target or "unknown")
         return ProtocolService.create_protocol_event(
             "shutdown_request",
             from_agent,
-            {"reason": reason},
+            {"requestId": request_id, "reason": reason},
         )
 
     @staticmethod
@@ -91,6 +97,48 @@ class ProtocolService:
             "idle_notification",
             from_agent,
             {"idleReason": reason},
+        )
+
+    @staticmethod
+    def create_task_assignment(from_agent: str, task_id: str, task_subject: str) -> Dict[str, Any]:
+        return ProtocolService.create_protocol_event(
+            "task_assignment",
+            from_agent,
+            {"taskId": task_id, "taskSubject": task_subject},
+        )
+
+    @staticmethod
+    def create_shutdown_approved(from_agent: str, request_id: str = "") -> Dict[str, Any]:
+        return ProtocolService.create_protocol_event(
+            "shutdown_approved",
+            from_agent,
+            {"requestId": request_id} if request_id else {},
+        )
+
+    @staticmethod
+    def create_task_completed(from_agent: str, task_id: str, task_subject: str) -> Dict[str, Any]:
+        return ProtocolService.create_protocol_event(
+            "task_completed",
+            from_agent,
+            {"taskId": task_id, "taskSubject": task_subject},
+        )
+
+    @staticmethod
+    def create_plan_approval_request(from_agent: str, request_id: str, plan: str) -> Dict[str, Any]:
+        return ProtocolService.create_protocol_event(
+            "plan_approval_request",
+            from_agent,
+            {"requestId": request_id, "plan": plan},
+        )
+
+    @staticmethod
+    def create_plan_approval_response(
+        from_agent: str, request_id: str, approve: bool, feedback: str = ""
+    ) -> Dict[str, Any]:
+        return ProtocolService.create_protocol_event(
+            "plan_approval_response",
+            from_agent,
+            {"requestId": request_id, "approve": approve, "feedback": feedback},
         )
 
     @staticmethod

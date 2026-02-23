@@ -17,12 +17,15 @@ from llm.base import LLMProvider, LLMResponse
 from llm.factory import get_provider
 from services.context_service import ContextBuilder
 from services.tool_service import ToolExecutor
+from services.protocol_service import ProtocolService
 from comms.json_store import InboxStore
 from comms.task_store import TaskStore
+from comms.sync import SupabaseSync
 
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_LOOPS = 10  # prevent infinite loops
+MAX_HISTORY_MESSAGES = 40  # trigger compaction when exceeded
 
 
 class AgentRunner:
@@ -39,6 +42,12 @@ class AgentRunner:
         task_store: TaskStore,
         team_agents: List[str],
         emit_sse: Optional[Callable[..., Coroutine]] = None,
+        lead_agent: Optional[str] = None,
+        is_leader: bool = False,
+        color: Optional[str] = None,
+        team_roster: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None,
+        supabase_sync: Optional[SupabaseSync] = None,
     ):
         self.agent_name = agent_name
         self.provider: LLMProvider = get_provider(provider_name)
@@ -48,6 +57,10 @@ class AgentRunner:
         self.task_store = task_store
         self.team_agents = team_agents
         self.emit_sse = emit_sse  # async callable(event_dict)
+        self.lead_agent = lead_agent
+        self.color = color
+        self.session_id = session_id
+        self.supabase_sync = supabase_sync
 
         self.context_builder = ContextBuilder(
             inbox_store=inbox_store,
@@ -55,6 +68,9 @@ class AgentRunner:
             agent_name=agent_name,
             agent_system_prompt=system_prompt,
             team_agents=team_agents,
+            team_roster=team_roster or [],
+            is_leader=is_leader,
+            lead_agent=lead_agent,
         )
 
         self.tool_executor = ToolExecutor(
@@ -63,12 +79,60 @@ class AgentRunner:
             agent_name=agent_name,
             team_agents=team_agents,
             on_message_sent=self._on_message_sent,
+            on_task_assigned=self._on_task_assigned,
+            on_task_completed=self._on_task_completed,
+            on_task_changed=self._on_task_changed,
         )
 
         # Conversation history persisted across turns within a session
         self.conversation_history: List[Dict[str, Any]] = []
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
+
+    async def _on_task_changed(self, task: Dict[str, Any]) -> None:
+        """Callback when a task is created or updated — emits task_update SSE."""
+        await self._emit("task_update", {
+            "id": task["id"],
+            "subject": task.get("subject", ""),
+            "description": task.get("description", ""),
+            "status": task.get("status", "pending"),
+            "owner": task.get("owner"),
+        })
+        if self.supabase_sync and self.session_id:
+            import asyncio
+            asyncio.create_task(self.supabase_sync.sync_task(self.session_id, task))
+
+    async def _on_task_completed(self, task: Dict[str, Any]) -> None:
+        """Callback when a task is completed — sends task_completed protocol to lead."""
+        if self.lead_agent and self.lead_agent != self.agent_name:
+            msg = ProtocolService.create_task_completed(self.agent_name, task["id"], task["subject"])
+            await self.inbox.append_message(
+                agent=self.lead_agent,
+                from_agent=self.agent_name,
+                text=msg["text"],
+                summary=msg["summary"],
+            )
+            await self._emit("protocol_message", {
+                "protocol_type": "task_completed",
+                "task_id": task["id"],
+                "task_subject": task["subject"],
+                "from": self.agent_name,
+            })
+
+    async def _on_task_assigned(self, owner: str, task: Dict[str, Any]) -> None:
+        """Callback when a task is assigned — sends protocol message to assignee."""
+        msg = ProtocolService.create_task_assignment(self.agent_name, task["id"], task["subject"])
+        await self.inbox.append_message(
+            agent=owner,
+            from_agent=self.agent_name,
+            text=msg["text"],
+            summary=msg["summary"],
+        )
+        await self._emit("protocol_message", {
+            "protocol_type": "task_assignment",
+            "task_id": task["id"],
+            "assigned_to": owner,
+        })
 
     async def _on_message_sent(self, to_agent: str, message: Dict[str, Any]) -> None:
         """Callback when a tool sends a message — emits SSE event."""
@@ -91,12 +155,64 @@ class AgentRunner:
                 "data": data or {},
             })
 
+    def _maybe_compact_history(self) -> None:
+        """Trim conversation_history when it exceeds MAX_HISTORY_MESSAGES.
+
+        Keeps a summary marker + the last 20 entries. The system prompt
+        already rebuilds team context + task list every turn, so state
+        recovery is automatic.
+        """
+        if len(self.conversation_history) <= MAX_HISTORY_MESSAGES:
+            return
+        trimmed_count = len(self.conversation_history) - 20
+        summary_marker = {
+            "role": "user",
+            "content": f"[System: {trimmed_count} earlier messages were compacted to save context. Team context and task list are rebuilt in the system prompt above.]",
+        }
+        self.conversation_history = [summary_marker] + self.conversation_history[-20:]
+        logger.info(f"{self.agent_name}: compacted history, trimmed {trimmed_count} messages")
+
+    async def _check_shutdown_request(self) -> bool:
+        """Scan raw inbox for shutdown_request. If found, auto-approve and return True."""
+        all_msgs = await self.inbox.read_all(self.agent_name)
+        for m in all_msgs:
+            if m.get("read"):
+                continue
+            parsed = ProtocolService.parse_protocol_message(m.get("text", ""))
+            if parsed and parsed.get("type") == "shutdown_request":
+                # Auto-send shutdown_approved to lead, linking requestId
+                req_id = parsed.get("requestId", "")
+                if self.lead_agent:
+                    approved = ProtocolService.create_shutdown_approved(self.agent_name, request_id=req_id)
+                    await self.inbox.append_message(
+                        agent=self.lead_agent,
+                        from_agent=self.agent_name,
+                        text=approved["text"],
+                        summary=approved["summary"],
+                    )
+                    await self._emit("protocol_message", {
+                        "protocol_type": "shutdown_approved",
+                        "from": self.agent_name,
+                    })
+                # Mark all messages read (including the shutdown_request)
+                await self.inbox.read_unread(self.agent_name)
+                return True
+        return False
+
     async def run_turn(self) -> Dict[str, Any]:
         """Execute one full turn (may involve multiple LLM calls if tools are used).
 
         Returns a summary dict of the turn.
         """
+        # Check for shutdown request before doing anything
+        if await self._check_shutdown_request():
+            await self._emit("turn_end", {"shutdown": True})
+            return {"agent": self.agent_name, "content": "", "loops": 0, "shutdown": True}
+
         await self._emit("turn_start")
+
+        # Compact history if needed
+        self._maybe_compact_history()
 
         messages = await self.context_builder.build_messages(self.conversation_history)
         tools = self.context_builder.get_tool_definitions()
@@ -167,6 +283,20 @@ class AgentRunner:
             "loops": loop_count,
             "prompt_tokens": self.total_prompt_tokens,
             "completion_tokens": self.total_completion_tokens,
+        })
+
+        # Send idle notification to lead agent
+        if self.lead_agent and self.lead_agent != self.agent_name:
+            idle_msg = ProtocolService.create_idle_notification(from_agent=self.agent_name)
+            await self.inbox.append_message(
+                agent=self.lead_agent,
+                from_agent=self.agent_name,
+                text=idle_msg["text"],
+                summary=idle_msg["summary"],
+            )
+        await self._emit("protocol_message", {
+            "protocol_type": "idle_notification",
+            "from": self.agent_name,
         })
 
         return {

@@ -102,6 +102,16 @@ async def health_check():
 @app.post("/api/sessions", response_model=SessionResponse)
 async def create_new_session(request: SessionRequest):
     """Start a new agent team session."""
+    # Merge env-var API keys as fallbacks
+    env_keys = {
+        "anthropic": os.getenv("ANTHROPIC_API_KEY", ""),
+        "openai": os.getenv("OPENAI_API_KEY", ""),
+        "kimi": os.getenv("KIMI_API_KEY", ""),
+    }
+    for provider, env_key in env_keys.items():
+        if env_key and not request.api_keys.get(provider):
+            request.api_keys[provider] = env_key
+
     # Validate models
     for agent in request.agents:
         if not model_service.validate_model(agent.model):
@@ -112,7 +122,7 @@ async def create_new_session(request: SessionRequest):
         if agent.provider not in request.api_keys and agent.provider != "ollama":
             raise HTTPException(
                 status_code=400,
-                detail=f"Missing API key for provider: {agent.provider}",
+                detail=f"Missing API key for provider: {agent.provider}. Set it in .env or pass in request.",
             )
 
     async def emit_sse(event):
@@ -125,11 +135,13 @@ async def create_new_session(request: SessionRequest):
     )
     sessions[session_id] = engine
 
-    # Persist to Supabase (fire-and-forget)
+    # Persist to Supabase (fire-and-forget, strip API keys)
+    safe_config = request.model_dump()
+    safe_config.pop("api_keys", None)
     await supabase_service.save_session(
         session_id,
         [a.name for a in request.agents],
-        request.model_dump(),
+        safe_config,
     )
 
     # Start orchestration
@@ -202,6 +214,12 @@ async def test_llm_key(request: LLMTestRequest):
     """Validate an API key by making a minimal LLM call."""
     from llm.factory import get_provider
 
+    # Fallback to env var if no key provided
+    api_key = request.api_key
+    if not api_key:
+        env_map = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "kimi": "KIMI_API_KEY"}
+        api_key = os.getenv(env_map.get(request.provider, ""), "")
+
     try:
         provider = get_provider(request.provider)
     except ValueError as e:
@@ -213,7 +231,7 @@ async def test_llm_key(request: LLMTestRequest):
                 {"role": "system", "content": "Reply with exactly: OK"},
                 {"role": "user", "content": "Test"},
             ],
-            api_key=request.api_key,
+            api_key=api_key,
             model=request.model,
         )
         return {
@@ -254,6 +272,15 @@ async def get_session_history(session_id: str):
     if not detail:
         raise HTTPException(status_code=404, detail="Session not found in history")
     return detail
+
+
+@app.delete("/api/history/{session_id}")
+async def delete_session_history(session_id: str):
+    """Delete a session and all its data from Supabase."""
+    deleted = await supabase_service.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"status": "deleted", "session_id": session_id}
 
 
 # ---------- Entry point ----------

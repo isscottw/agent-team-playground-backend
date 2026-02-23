@@ -5,11 +5,19 @@ from pydantic import BaseModel, Field
 class AgentConfig(BaseModel):
     """Configuration for a single agent in the team."""
     name: str = Field(..., description="Agent display name, e.g. 'researcher'")
+    role: str = Field(
+        default="teammate",
+        description="Agent role: 'leader' or 'teammate'",
+    )
     provider: str = Field(..., description="LLM provider: anthropic, openai, kimi, ollama")
     model: str = Field(..., description="Model ID, e.g. claude-sonnet-4-6")
     system_prompt: str = Field(
         default="You are a helpful AI assistant.",
         description="System prompt that defines this agent's role",
+    )
+    color: Optional[str] = Field(
+        default=None,
+        description="Display color for this agent in the UI",
     )
     connections: List[str] = Field(
         default_factory=list,

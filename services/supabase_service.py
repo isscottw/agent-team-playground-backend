@@ -13,25 +13,31 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 _supabase_client = None
+_client_init_attempted = False
 
 
 def _get_client():
-    global _supabase_client
+    global _supabase_client, _client_init_attempted
     if _supabase_client is not None:
         return _supabase_client
+    if _client_init_attempted:
+        return None
+    _client_init_attempted = True
 
     url = os.getenv("SUPABASE_URL", "")
     key = os.getenv("SUPABASE_KEY", "")
+    logger.info(f"Supabase init: URL={'set' if url else 'NOT SET'}, KEY={'set' if key else 'NOT SET'}")
     if not url or not key:
-        logger.info("SUPABASE_URL/SUPABASE_KEY not set — Supabase sync disabled")
+        logger.warning("SUPABASE_URL/SUPABASE_KEY not set — Supabase sync disabled")
         return None
 
     try:
         from supabase import create_client
         _supabase_client = create_client(url, key)
+        logger.info("Supabase client created successfully")
         return _supabase_client
     except Exception as e:
-        logger.warning(f"Failed to create Supabase client: {e}")
+        logger.error(f"Failed to create Supabase client: {e}", exc_info=True)
         return None
 
 
@@ -40,17 +46,20 @@ class SupabaseService:
     async def save_session(self, session_id: str, agents: List[str], config: Dict[str, Any]) -> None:
         client = _get_client()
         if not client:
+            logger.warning(f"save_session skipped — no Supabase client")
             return
         try:
-            client.table("sessions").insert({
+            logger.info(f"Saving session {session_id} to Supabase...")
+            result = client.table("sessions").insert({
                 "id": session_id,
                 "agents": agents,
                 "config": config,
                 "status": "running",
                 "created_at": datetime.utcnow().isoformat(),
             }).execute()
+            logger.info(f"Session saved: {result.data}")
         except Exception as e:
-            logger.warning(f"Failed to save session to Supabase: {e}")
+            logger.error(f"Failed to save session to Supabase: {e}", exc_info=True)
 
     async def end_session(self, session_id: str) -> None:
         client = _get_client()
@@ -63,6 +72,18 @@ class SupabaseService:
             }).eq("id", session_id).execute()
         except Exception as e:
             logger.warning(f"Failed to end session in Supabase: {e}")
+
+    async def delete_session(self, session_id: str) -> bool:
+        client = _get_client()
+        if not client:
+            return False
+        try:
+            # CASCADE deletes messages_history, agent_turns, tasks_history
+            result = client.table("sessions").delete().eq("id", session_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Failed to delete session from Supabase: {e}")
+            return False
 
     async def save_message(self, session_id: str, agent: str, message: Dict[str, Any]) -> None:
         client = _get_client()

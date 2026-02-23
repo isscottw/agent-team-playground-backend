@@ -1,10 +1,14 @@
-__pycache__/
-*.py[cod]
 .env
+.env.*
 .venv/
 venv/
+env/
+data/
+__pycache__/
+*.py[cod]
 .git/
 .gitignore
-data/
 .idea/
 .vscode/
+tests/
+.DS_Store
