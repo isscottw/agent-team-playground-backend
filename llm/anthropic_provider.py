@@ -10,8 +10,8 @@ from llm.base import LLMProvider, LLMResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-sonnet-4-6-20250514"
-SUPPORTED_MODELS = ["claude-sonnet-4-6-20250514", "claude-haiku-4-5-20251001"]
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
+SUPPORTED_MODELS = ["claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
 
 
 class AnthropicProvider(LLMProvider):
