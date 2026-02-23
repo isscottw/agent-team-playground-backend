@@ -4,7 +4,7 @@ FastAPI backend for multi-agent team orchestration. Agents communicate via files
 
 **Frontend repo:** [agent-team-playground-frontend](https://github.com/isscottw/agent-team-playground-frontend)
 
-**Live frontend:** [agent-team-playground-frontend.vercel.app](https://agent-team-playground-frontend.vercel.app)
+**Live frontend:** [agent-team-playground.vercel.app](https://agent-team-playground.vercel.app)
 
 ## Supported LLM Providers
 
