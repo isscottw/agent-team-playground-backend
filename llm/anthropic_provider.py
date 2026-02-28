@@ -52,7 +52,7 @@ class AnthropicProvider(LLMProvider):
 
         kwargs: Dict[str, Any] = {
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "messages": chat_messages,
         }
         if system_prompt:

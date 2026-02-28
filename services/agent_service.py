@@ -62,6 +62,8 @@ class AgentRunner:
         self.session_id = session_id
         self.supabase_sync = supabase_sync
 
+        self.is_leader = is_leader
+
         self.context_builder = ContextBuilder(
             inbox_store=inbox_store,
             task_store=task_store,
@@ -249,8 +251,13 @@ class AgentRunner:
                 messages.append({"role": "assistant", "content": response.content})
                 self.conversation_history.append({"role": "assistant", "content": response.content})
 
-            # If no tool calls, turn is done
+            # If no tool calls, check if response was truncated
             if not response.tool_calls:
+                if response.stop_reason == "max_tokens" and loop_count < MAX_TOOL_LOOPS:
+                    # Response was truncated — ask agent to continue
+                    messages.append({"role": "user", "content": "[System: Your response was truncated due to length. Please continue where you left off, or use the SendMessage tool to send your deliverable to your lead.]"})
+                    self.conversation_history.append({"role": "user", "content": "[System: Response truncated. Continue or use SendMessage.]"})
+                    continue
                 break
 
             # Process tool calls
@@ -284,14 +291,40 @@ class AgentRunner:
             messages.append({"role": "user", "content": combined})
             self.conversation_history.append({"role": "user", "content": combined})
 
+        # Auto-shutdown: if teammate finished all tasks but forgot shutdown_request
+        if (not should_stop
+                and not self.is_leader
+                and self.lead_agent
+                and self.lead_agent != self.agent_name):
+            all_tasks = await self.task_store.list_tasks()
+            my_tasks = [t for t in all_tasks if t.get("owner") == self.agent_name]
+            if my_tasks and all(t.get("status") == "completed" for t in my_tasks):
+                logger.info(f"{self.agent_name}: all tasks completed, auto-sending shutdown_request")
+                shutdown_msg = ProtocolService.create_shutdown_request(
+                    from_agent=self.agent_name,
+                    reason="All tasks complete",
+                    target=self.lead_agent,
+                )
+                await self.inbox.append_message(
+                    agent=self.lead_agent,
+                    from_agent=self.agent_name,
+                    text=shutdown_msg["text"],
+                    summary=shutdown_msg["summary"],
+                )
+                await self._emit("protocol_message", {
+                    "protocol_type": "shutdown_request",
+                    "from": self.agent_name,
+                })
+                should_stop = True
+
         await self._emit("turn_end", {
             "loops": loop_count,
             "prompt_tokens": self.total_prompt_tokens,
             "completion_tokens": self.total_completion_tokens,
         })
 
-        # Send idle notification to lead agent
-        if self.lead_agent and self.lead_agent != self.agent_name:
+        # Send idle notification to lead agent (skip if shutting down)
+        if self.lead_agent and self.lead_agent != self.agent_name and not should_stop:
             idle_msg = ProtocolService.create_idle_notification(from_agent=self.agent_name)
             await self.inbox.append_message(
                 agent=self.lead_agent,
@@ -304,13 +337,16 @@ class AgentRunner:
             "from": self.agent_name,
         })
 
-        return {
+        result = {
             "agent": self.agent_name,
             "content": final_content,
             "loops": loop_count,
             "prompt_tokens": self.total_prompt_tokens,
             "completion_tokens": self.total_completion_tokens,
         }
+        if should_stop:
+            result["shutdown"] = True
+        return result
 
     async def inject_user_message(self, text: str) -> None:
         """Inject a user/leader message into this agent's inbox."""
