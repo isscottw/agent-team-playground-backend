@@ -219,8 +219,9 @@ class AgentRunner:
 
         loop_count = 0
         final_content = ""
+        should_stop = False  # set when agent sends shutdown_request
 
-        while loop_count < MAX_TOOL_LOOPS:
+        while loop_count < MAX_TOOL_LOOPS and not should_stop:
             loop_count += 1
 
             await self._emit("thinking", {"loop": loop_count})
@@ -273,6 +274,10 @@ class AgentRunner:
                 })
 
                 tool_results_text.append(f"[Tool {tc.name} result]: {result}")
+
+                # Stop looping after shutdown_request — agent is done
+                if tc.name == "SendMessage" and tc.arguments.get("type") == "shutdown_request":
+                    should_stop = True
 
             # Inject tool results as a user message for the next loop
             combined = "\n\n".join(tool_results_text)
