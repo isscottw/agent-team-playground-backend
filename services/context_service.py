@@ -112,7 +112,7 @@ IMPORTANT: Before creating tasks, check the "Current tasks" list below. Do NOT c
                 reporting = f"""You report to "{self.lead_agent}".
 When you receive tasks from "{self.lead_agent}", delegate them to your team."""
                 completion = f"""After ALL your reports have completed and shut down:
-7. Report the combined results back to "{self.lead_agent}" via SendMessage
+7. Compile your team's deliverables into a COMPLETE report and send it to "{self.lead_agent}" via SendMessage. Include ALL the actual content from your reports — your lead cannot see what your teammates sent you, only what you explicitly forward. Do NOT just say "work is done" — send the full compiled output.
 8. Then request shutdown: SendMessage with type="shutdown_request", recipient="{self.lead_agent}", content="All tasks complete" """
             else:
                 reporting = "You receive requests directly from the user."
@@ -150,8 +150,8 @@ The system will send you status checks when the team is idle. Pay attention to t
         return f"""
 ## Teammate Responsibilities
 You are a TEAMMATE. You report to "{lead_name}". You must:
-1. When you receive a task, do the work described
-2. Send your results back to "{lead_name}" via SendMessage
+1. When you receive a task, do the work described — produce the FULL deliverable
+2. Send your COMPLETE work product back to "{lead_name}" via SendMessage. Include ALL of your output in the message — your lead cannot see your thinking, only what you explicitly send. Do NOT just say "done" or "task complete" — send the actual content (spec, analysis, design, code, etc.)
 3. Mark your assigned task as completed using TaskUpdate (status="completed")
 4. After completing ALL your tasks, request shutdown by sending: SendMessage with type="shutdown_request", recipient="{lead_name}", content="All tasks complete"
 """
