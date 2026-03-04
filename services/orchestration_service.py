@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 AGENT_COLORS = ["blue", "green", "orange", "purple"]
 IDLE_TIMEOUT = 300  # 5 minutes with no activity before auto-stop
-LEADER_NUDGE_INTERVAL = 60  # seconds idle before nudging leader to check on team
+LEADER_NUDGE_INTERVAL = 120  # seconds idle before nudging leader to check on team
 
 
 class TeamEngine:

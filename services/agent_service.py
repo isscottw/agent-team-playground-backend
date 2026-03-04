@@ -221,7 +221,9 @@ class AgentRunner:
 
         loop_count = 0
         final_content = ""
-        should_stop = False  # set when agent sends shutdown_request
+        should_stop = False  # break the turn loop
+        sent_shutdown = False  # explicitly sent shutdown_request
+        deliverable_sent = False  # teammate already sent a message to lead
 
         while loop_count < MAX_TOOL_LOOPS and not should_stop:
             loop_count += 1
@@ -282,17 +284,33 @@ class AgentRunner:
 
                 tool_results_text.append(f"[Tool {tc.name} result]: {result}")
 
-                # Stop looping after shutdown_request — agent is done
-                if tc.name == "SendMessage" and tc.arguments.get("type") == "shutdown_request":
+                # Track SendMessage calls
+                if tc.name == "SendMessage":
+                    if tc.arguments.get("type") == "shutdown_request":
+                        should_stop = True
+                        sent_shutdown = True
+                    elif (not self.is_leader
+                          and tc.arguments.get("recipient") == self.lead_agent
+                          and tc.arguments.get("type", "message") == "message"):
+                        deliverable_sent = True
+
+            # Early exit: teammate sent deliverable AND completed all tasks
+            if not should_stop and not self.is_leader and self.lead_agent and deliverable_sent:
+                all_tasks = await self.task_store.list_tasks()
+                my_tasks = [t for t in all_tasks if t.get("owner") == self.agent_name]
+                if my_tasks and all(t.get("status") == "completed" for t in my_tasks):
                     should_stop = True
 
             # Inject tool results as a user message for the next loop
             combined = "\n\n".join(tool_results_text)
+            # Nudge teammate after sending deliverable: mark tasks complete and stop
+            if deliverable_sent and not should_stop and not self.is_leader:
+                combined += "\n\n[System: Your deliverable has been sent. Now use TaskUpdate to mark your task(s) as completed (status=\"completed\"), then stop. Do NOT re-send your deliverable.]"
             messages.append({"role": "user", "content": combined})
             self.conversation_history.append({"role": "user", "content": combined})
 
-        # Auto-shutdown: if teammate finished all tasks but forgot shutdown_request
-        if (not should_stop
+        # Auto-shutdown: if teammate finished all tasks but didn't send shutdown_request
+        if (not sent_shutdown
                 and not self.is_leader
                 and self.lead_agent
                 and self.lead_agent != self.agent_name):
